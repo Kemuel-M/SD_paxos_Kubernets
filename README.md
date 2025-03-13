@@ -133,6 +133,13 @@ chmod +x paxos-client.sh
 Comandos disponíveis:
 
 ```bash
+# Para usar especificamente o client2
+CLIENT=client2 ./paxos-client.sh write "valor do client2"
+
+# Para usar um proposer específico no direct-write
+PROPOSER=proposer2 ./paxos-client.sh direct-write "direto para proposer2"
+
+### Para usar o client1 (padrão)
 # Enviar um valor para o sistema
 ./paxos-client.sh write "novo valor"
 
