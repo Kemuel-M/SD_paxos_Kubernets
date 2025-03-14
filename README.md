@@ -1,68 +1,80 @@
-# Guia de Implantação do Sistema Paxos no Kubernetes (WSL/Ubuntu)
+# Sistema Distribuído de Consenso Paxos em Kubernetes
 
-Este guia explica como implantar e utilizar o sistema Paxos em um ambiente Kubernetes usando WSL com Ubuntu.
+Este projeto implementa um sistema distribuído baseado no algoritmo de consenso Paxos, executando em um ambiente Kubernetes. O sistema garante consistência e disponibilidade, mesmo em cenários de falhas parciais de nós.
 
 ## Índice
 
-1. [Preparação do Ambiente](#1-preparação-do-ambiente)
-2. [Estrutura de Arquivos](#2-estrutura-de-arquivos)
-3. [Implantação do Sistema](#3-implantação-do-sistema)
-4. [Interação com o Sistema](#4-interação-com-o-sistema)
-5. [Monitoramento](#5-monitoramento)
-6. [Solução de Problemas](#6-solução-de-problemas)
-7. [Limpeza](#7-limpeza)
+1. [Visão Geral do Sistema](#visão-geral-do-sistema)
+2. [Arquitetura](#arquitetura)
+3. [Componentes do Sistema](#componentes-do-sistema)
+4. [Requisitos de Sistema](#requisitos-de-sistema)
+5. [Instalação e Configuração](#instalação-e-configuração)
+6. [Guia de Uso](#guia-de-uso)
+7. [Scripts Disponíveis](#scripts-disponíveis)
+8. [Exemplos de Uso](#exemplos-de-uso)
+9. [Solução de Problemas](#solução-de-problemas)
+10. [Entendendo o Algoritmo Paxos](#entendendo-o-algoritmo-paxos)
 
-## 1. Preparação do Ambiente
+## Visão Geral do Sistema
 
-### 1.1. Requisitos
+O sistema Paxos implementa um protocolo de consenso distribuído projetado para garantir que um conjunto de nós concorde sobre valores propostos, mesmo em ambientes com falhas parciais. Esta implementação é composta por:
 
-- Windows 10/11 com WSL2 instalado
-- Ubuntu no WSL
-- Docker instalado no WSL
-- Acesso à internet
+- **Proposers**: Iniciam propostas e coordenam o processo de consenso
+- **Acceptors**: Aceitam ou rejeitam propostas, garantindo consistência
+- **Learners**: Aprendem os valores que alcançaram consenso
+- **Clients**: Enviam solicitações e recebem respostas
 
-### 1.2. Instalação das Ferramentas
+O sistema usa o algoritmo Paxos Completo e inclui um protocolo Gossip para descoberta de nós, permitindo uma operação totalmente descentralizada.
 
-Execute o script de preparação do ambiente:
+## Arquitetura
 
-```bash
-chmod +x setup-kubernetes-wsl.sh
-./setup-kubernetes-wsl.sh
+### Arquitetura de Software
+
+O sistema é construído com uma arquitetura orientada a objetos em Python:
+
+```
+BaseNode (Classe Abstrata)
+  ├── Proposer
+  ├── Acceptor
+  ├── Learner
+  └── Client
 ```
 
-Este script instala:
-- Docker (se não estiver instalado)
-- kubectl
-- Minikube
+Cada nó expõe uma API REST usando Flask para comunicação, e o estado distribuído é gerenciado pelo protocolo Gossip.
 
-### 1.3. Inicialização do Cluster Minikube
+### Arquitetura do Kubernetes
 
-```bash
-minikube start --driver=docker
+O sistema é implantado em um cluster Kubernetes com:
+
+```
+Namespace "paxos"
+  ├── Deployments
+  │   ├── proposer1, proposer2, proposer3
+  │   ├── acceptor1, acceptor2, acceptor3
+  │   ├── learner1, learner2
+  │   └── client1, client2
+  ├── Services
+  │   ├── proposer-services
+  │   ├── acceptor-services
+  │   ├── learner-services
+  │   └── client-services
+  └── NodePort Services (para acesso externo)
 ```
 
-Verifique se o cluster está funcionando:
-
-```bash
-minikube status
-```
-
-## 2. Estrutura de Arquivos
-
-Organize os arquivos da seguinte maneira:
+### Estrutura de Diretórios
 
 ```
 paxos-system/
 ├── nodes/                  # Código-fonte dos nós
 │   ├── Dockerfile
-│   ├── base_node.py
-│   ├── gossip_protocol.py
-│   ├── proposer_node.py
-│   ├── acceptor_node.py
-│   ├── learner_node.py
-│   ├── client_node.py
-│   ├── main.py
-│   └── requirements.txt
+│   ├── base_node.py        # Classe base abstrata
+│   ├── gossip_protocol.py  # Implementação do protocolo Gossip
+│   ├── proposer_node.py    # Implementação do Proposer
+│   ├── acceptor_node.py    # Implementação do Acceptor
+│   ├── learner_node.py     # Implementação do Learner
+│   ├── client_node.py      # Implementação do Client
+│   ├── main.py             # Ponto de entrada principal
+│   └── requirements.txt    # Dependências Python
 ├── k8s/                    # Manifestos Kubernetes
 │   ├── 00-namespace.yaml
 │   ├── 01-configmap.yaml
@@ -72,305 +84,514 @@ paxos-system/
 │   ├── 05-clients.yaml
 │   ├── 06-ingress.yaml
 │   └── 07-nodeport-services.yaml
-├── setup-kubernetes-wsl.sh # Script de preparação do ambiente
-├── deploy-paxos-k8s.sh     # Script de implantação
-├── cleanup-paxos-k8s.sh    # Script de limpeza
-├── paxos-client.sh         # Cliente de linha de comando
-└── paxos_k8s_client.py     # Cliente Python
+├── setup-kubernetes-wsl.sh # Configuração do ambiente no WSL
+├── deploy-paxos-k8s.sh     # Implantação do sistema no Kubernetes
+├── run.sh                  # Inicialização da rede Paxos
+├── paxos-client.sh         # Cliente interativo
+├── monitor.sh              # Monitor em tempo real
+├── cleanup-paxos-k8s.sh    # Limpeza do sistema
+└── README.md               # Este arquivo
 ```
 
-## 3. Implantação do Sistema
+## Componentes do Sistema
 
-### 3.1. Construir Imagem e Implantar
+### 1. Proposers
 
-Execute o script de implantação:
+Proposers são os nós responsáveis por iniciar propostas e coordenar o processo de consenso.
+
+**Características principais:**
+- Recebem solicitações dos clientes
+- Iniciam o processo de Paxos com mensagens "prepare"
+- Enviam mensagens "accept" quando recebem quórum de "promise"
+- Implementam eleição de líder para evitar conflitos
+- Apenas o líder eleito pode propor valores
+- Usam números de proposta únicos (timestamp * 100 + ID)
+
+**Endpoints API:**
+- `/propose`: Recebe propostas de clientes
+- `/health`: Verifica saúde do nó
+- `/view-logs`: Visualiza logs e estado interno
+
+### 2. Acceptors
+
+Acceptors são os guardiões da consistência, aceitando ou rejeitando propostas.
+
+**Características principais:**
+- Respondem a mensagens "prepare" com "promise" ou rejeição
+- Aceitam propostas quando o número da proposta é maior ou igual ao prometido
+- Mantêm registro do maior número prometido e do valor aceito
+- Notificam Learners sobre propostas aceitas
+- Formam quórum para decisão (maioria simples)
+
+**Endpoints API:**
+- `/prepare`: Recebe mensagens "prepare" dos Proposers
+- `/accept`: Recebe mensagens "accept" dos Proposers
+- `/health`: Verifica saúde do nó
+- `/view-logs`: Visualiza logs e estado interno
+
+### 3. Learners
+
+Learners são responsáveis por aprender e armazenar os valores que alcançaram consenso.
+
+**Características principais:**
+- Recebem notificações dos Acceptors sobre valores aceitos
+- Determinam quando um valor atingiu consenso (quórum de Acceptors)
+- Armazenam valores aprendidos
+- Notificam clientes sobre valores aprendidos
+- Servem como fonte de leitura para consultas
+
+**Endpoints API:**
+- `/learn`: Recebe notificações de valores aceitos
+- `/get-values`: Retorna valores aprendidos
+- `/health`: Verifica saúde do nó
+- `/view-logs`: Visualiza logs e estado interno
+
+### 4. Clients
+
+Clients são interfaces para interação com o sistema.
+
+**Características principais:**
+- Enviam solicitações de escrita para Proposers
+- Recebem notificações dos Learners
+- Consultam Learners para leitura de valores
+- Rastreiam respostas recebidas
+
+**Endpoints API:**
+- `/send`: Envia valor para o sistema
+- `/notify`: Recebe notificação de valor aprendido
+- `/read`: Lê valores do sistema
+- `/get-responses`: Obtém respostas recebidas
+- `/health`: Verifica saúde do nó
+- `/view-logs`: Visualiza logs e estado interno
+
+### 5. Protocolo Gossip
+
+O protocolo Gossip é usado para descoberta descentralizada de nós e propagação de metadados.
+
+**Características principais:**
+- Permite descoberta automática de nós
+- Propaga informações sobre o líder eleito
+- Detecta nós inativos
+- Distribui metadados entre todos os nós
+- Funciona sem ponto único de falha
+
+**Endpoints API:**
+- `/gossip`: Recebe atualizações de estado de outros nós
+- `/gossip/nodes`: Fornece informações sobre nós conhecidos
+
+## Requisitos de Sistema
+
+### Para ambiente de desenvolvimento (WSL/Ubuntu):
+
+- Windows 10/11 com WSL2 habilitado
+- Ubuntu 20.04 LTS ou superior no WSL
+- Docker Engine 19.03+
+- Kubernetes (via Minikube)
+- Python 3.8+
+- 4GB+ de RAM disponível
+- 10GB+ de espaço em disco
+
+### Para ambiente de produção:
+
+- Cluster Kubernetes v1.18+
+- Registro de contêineres (Docker Registry)
+- Sistema de armazenamento persistente
+- Balanceador de carga externo (opcional)
+- Monitoramento e logging (recomendado)
+
+## Instalação e Configuração
+
+### 1. Preparação do Ambiente WSL
 
 ```bash
+# Torne o script executável
+chmod +x setup-kubernetes-wsl.sh
+
+# Execute o script de preparação
+./setup-kubernetes-wsl.sh
+
+# Reinicie o WSL após a instalação
+# No PowerShell do Windows:
+wsl --shutdown
+# Reabra seu terminal WSL
+```
+
+O script `setup-kubernetes-wsl.sh` instala:
+- Docker
+- kubectl
+- Minikube
+- Dependências necessárias
+
+### 2. Inicialização do Cluster Minikube
+
+```bash
+# Inicie o cluster Minikube
+minikube start --driver=docker
+
+# Verifique o status
+minikube status
+```
+
+### 3. Implantação do Sistema no Kubernetes
+
+```bash
+# Torne o script executável
 chmod +x deploy-paxos-k8s.sh
+
+# Execute o script de implantação
 ./deploy-paxos-k8s.sh
 ```
 
-Este script:
-1. Verifica se o Minikube está em execução
-2. Constrói a imagem Docker do nó Paxos
-3. Cria todos os recursos Kubernetes necessários
-4. Configura o acesso externo ao sistema
+O script `deploy-paxos-k8s.sh`:
+1. Constrói a imagem Docker do nó Paxos
+2. Cria o namespace "paxos"
+3. Aplica todos os manifestos Kubernetes
+4. Configura serviços NodePort para acesso externo
+5. Aguarda a inicialização dos pods
 
-### 3.2. Verificar a Implantação
-
-Verifique se todos os pods estão em execução:
-
-```bash
-kubectl get pods -n paxos
-```
-
-Você deve ver algo como:
-
-```
-NAME                         READY   STATUS    RESTARTS   AGE
-acceptor1-58f5b9dc74-xhf2g   1/1     Running   0          2m
-acceptor2-58f5b9dc74-pqr3t   1/1     Running   0          2m
-acceptor3-58f5b9dc74-lkj4f   1/1     Running   0          2m
-client1-665b87b4c9-zxc2v     1/1     Running   0          2m
-client2-665b87b4c9-asd1f     1/1     Running   0          2m
-learner1-58f5b9dc74-qwe5r    1/1     Running   0          2m
-learner2-58f5b9dc74-tyu6y    1/1     Running   0          2m
-proposer1-58f5b9dc74-mnb7h   1/1     Running   0          2m
-proposer2-58f5b9dc74-bnm8j   1/1     Running   0          2m
-proposer3-58f5b9dc74-vbn9k   1/1     Running   0          2m
-```
-
-## 4. Interação com o Sistema
-
-### 4.1. Usando o Cliente Shell
-
-Torne o script do cliente executável:
+### 4. Inicialização da Rede Paxos
 
 ```bash
+# Torne o script executável
+chmod +x run.sh
+
+# Execute o script de inicialização
+./run.sh
+```
+
+O script `run.sh`:
+1. Verifica se todos os pods estão prontos
+2. Inicia o processo de eleição de líder
+3. Verifica a saúde de todos os componentes
+4. Exibe URLs de acesso
+
+## Guia de Uso
+
+### 1. Interagindo com o Sistema via Cliente Interativo
+
+```bash
+# Torne o script executável
 chmod +x paxos-client.sh
+
+# Execute o cliente interativo
+./paxos-client.sh
 ```
 
-Comandos disponíveis:
+O cliente interativo oferece as seguintes opções:
+1. **Selecionar cliente**: Escolher entre Client1 e Client2
+2. **Enviar valor**: Enviar um valor para o sistema Paxos
+3. **Ler valores**: Ler valores armazenados no sistema
+4. **Visualizar respostas**: Ver respostas recebidas dos Learners
+5. **Ver status do cliente**: Verificar status do cliente atual
+6. **Ver status do líder**: Verificar qual Proposer é o líder atual
+7. **Enviar diretamente para Proposer**: Enviar valor sem passar pelo Cliente
+8. **Ver status do sistema**: Verificar status de todos os componentes
+
+### 2. Monitorando o Sistema em Tempo Real
 
 ```bash
-# Para usar especificamente o client2
-CLIENT=client2 ./paxos-client.sh write "valor do client2"
+# Torne o script executável
+chmod +x monitor.sh
 
-# Para usar um proposer específico no direct-write
-PROPOSER=proposer2 ./paxos-client.sh direct-write "direto para proposer2"
-
-### Para usar o client1 (padrão)
-# Enviar um valor para o sistema
-./paxos-client.sh write "novo valor"
-
-# Enviar um valor diretamente para o proposer
-./paxos-client.sh direct-write "valor direto"
-
-# Ler valores do sistema
-./paxos-client.sh read
-
-# Ver respostas recebidas pelo cliente
-./paxos-client.sh responses
-
-# Ver status do sistema
-./paxos-client.sh status
-
-# Abrir acesso no navegador
-./paxos-client.sh open
+# Execute o monitor em tempo real
+./monitor.sh
 ```
 
-### 4.2. Usando o Cliente Python
-
-Torne o script Python executável:
-
+Opções do monitor:
 ```bash
-chmod +x paxos_k8s_client.py
+# Monitorar apenas proposers, atualizando a cada 5 segundos
+./monitor.sh --proposers --interval 5
+
+# Monitorar apenas acceptors e learners, sem seguir os logs
+./monitor.sh --acceptors --learners --no-follow
+
+# Modo verboso com logs do Kubernetes
+./monitor.sh --verbose --kubectl-logs
 ```
 
-Comandos disponíveis:
+### 3. Limpando o Sistema
 
 ```bash
-# Enviar um valor para o sistema
-./paxos_k8s_client.py write "novo valor"
-
-# Enviar um valor diretamente para o proposer
-./paxos_k8s_client.py direct-write "valor direto"
-
-# Ler valores do sistema
-./paxos_k8s_client.py read
-
-# Ver respostas recebidas pelo cliente
-./paxos_k8s_client.py responses
-
-# Ver status do sistema
-./paxos_k8s_client.py status
-
-# Monitorar o sistema por 2 minutos
-./paxos_k8s_client.py monitor --duration 120 --interval 10
-```
-
-### 4.3. Acesso via Navegador
-
-Para acessar o sistema via navegador, execute:
-
-```bash
-minikube service client1-external -n paxos
-```
-
-Isso abrirá o navegador com a URL de acesso ao cliente.
-
-## 5. Monitoramento
-
-### 5.1. Dashboard do Kubernetes
-
-Acesse o dashboard do Kubernetes:
-
-```bash
-minikube dashboard
-```
-
-### 5.2. Logs dos Pods
-
-Visualize os logs de um pod específico:
-
-```bash
-# Para o proposer1
-kubectl logs -n paxos -l app=proposer1
-
-# Para o client1
-kubectl logs -n paxos -l app=client1
-```
-
-### 5.3. Status do Sistema
-
-Visualize o status detalhado de um serviço:
-
-```bash
-# Status do proposer1
-kubectl exec -n paxos $(kubectl get pods -n paxos -l app=proposer1 -o jsonpath="{.items[0].metadata.name}") -- curl -s http://localhost:3001/view-logs
-
-# Status do client1
-kubectl exec -n paxos $(kubectl get pods -n paxos -l app=client1 -o jsonpath="{.items[0].metadata.name}") -- curl -s http://localhost:6001/view-logs
-```
-
-## 6. Solução de Problemas
-
-### 6.1. Pods não iniciam
-
-Se alguns pods não estiverem iniciando corretamente:
-
-```bash
-# Verifique o status detalhado dos pods
-kubectl describe pods -n paxos
-
-# Verifique os logs dos pods com problemas
-kubectl logs -n paxos <nome-do-pod>
-```
-
-### 6.2. Problemas de rede
-
-Se houver problemas de comunicação entre os pods:
-
-```bash
-# Teste a resolução de nomes de serviço de dentro de um pod
-kubectl exec -it -n paxos $(kubectl get pods -n paxos -l app=client1 -o jsonpath="{.items[0].metadata.name}") -- nslookup proposer1
-
-# Teste a conectividade usando curl de dentro de um pod
-kubectl exec -it -n paxos $(kubectl get pods -n paxos -l app=client1 -o jsonpath="{.items[0].metadata.name}") -- curl -v http://proposer1:3001/health
-```
-
-### 6.3. Problemas no algoritmo Paxos
-
-Se o sistema não estiver conseguindo eleger um líder ou processar propostas:
-
-```bash
-# Verifique o status do proposer1 (normalmente o líder inicial)
-kubectl exec -n paxos $(kubectl get pods -n paxos -l app=proposer1 -o jsonpath="{.items[0].metadata.name}") -- curl -s http://localhost:3001/view-logs
-
-# Verifique o status dos acceptors
-kubectl exec -n paxos $(kubectl get pods -n paxos -l app=acceptor1 -o jsonpath="{.items[0].metadata.name}") -- curl -s http://localhost:4001/view-logs
-```
-
-### 6.4. Reiniciar componentes
-
-Se um componente específico não estiver funcionando corretamente, você pode reiniciá-lo:
-
-```bash
-# Reiniciar um deployment específico (por exemplo, proposer1)
-kubectl rollout restart deployment proposer1 -n paxos
-
-# Reiniciar todos os deployments
-kubectl rollout restart deployment -n paxos
-```
-
-## 7. Limpeza
-
-### 7.1. Limpeza do Sistema Paxos
-
-Para remover todos os recursos do sistema Paxos:
-
-```bash
+# Torne o script executável
 chmod +x cleanup-paxos-k8s.sh
+
+# Execute o script de limpeza
 ./cleanup-paxos-k8s.sh
 ```
 
-### 7.2. Parar o Minikube
+O script perguntará se você deseja parar ou excluir o cluster Minikube após a limpeza.
 
-Se quiser parar o cluster completamente:
+## Scripts Disponíveis
 
+### 1. setup-kubernetes-wsl.sh
+
+**Propósito**: Preparar o ambiente Kubernetes no WSL.
+
+**Funcionalidades**:
+- Instala Docker, kubectl, Minikube
+- Configura permissões e grupos de usuário
+- Prepara o ambiente para execução do Kubernetes no WSL
+
+**Uso**:
 ```bash
-minikube stop
+./setup-kubernetes-wsl.sh
 ```
 
-Para remover o cluster Minikube:
+### 2. deploy-paxos-k8s.sh
 
+**Propósito**: Implantar o sistema Paxos no Kubernetes.
+
+**Funcionalidades**:
+- Verifica pré-requisitos (Docker, kubectl, Minikube)
+- Constrói a imagem Docker para os nós
+- Aplica manifestos Kubernetes
+- Configura serviços e acessos
+
+**Uso**:
 ```bash
-minikube delete
+./deploy-paxos-k8s.sh
 ```
 
-## 8. Arquitetura do Sistema
+### 3. run.sh
 
-### 8.1. Visão Geral
+**Propósito**: Inicializar a rede Paxos após a implantação no Kubernetes.
 
-O sistema Paxos no Kubernetes é composto por:
+**Funcionalidades**:
+- Verifica status dos pods
+- Inicia eleição de líder
+- Verifica a saúde do sistema
+- Exibe URLs de acesso
 
-- **3 Proposers**: Iniciam propostas e coordenam o consenso
-- **3 Acceptors**: Aceitam ou rejeitam propostas
-- **2 Learners**: Aprendem valores escolhidos
-- **2 Clients**: Enviam requisições e recebem resultados
-
-### 8.2. Comunicação
-
-No ambiente Kubernetes:
-
-1. A descoberta de serviços é feita pelo DNS interno do Kubernetes
-2. Cada serviço tem um nome DNS previsível (ex: `proposer1.paxos.svc.cluster.local`)
-3. A comunicação entre os pods é facilitada pela rede interna do Kubernetes
-4. O acesso externo é fornecido por serviços NodePort e potencialmente Ingress
-
-### 8.3. Persistência
-
-No ambiente atual, o sistema opera sem persistência de estado entre reinicializações. Em uma configuração de produção, você pode adicionar:
-
-- PersistentVolumeClaims para armazenar dados
-- StatefulSets em vez de Deployments para nós que precisam manter estado
-
-## 9. Personalizações e Extensões
-
-### 9.1. Escalar o Sistema
-
-Para aumentar o número de réplicas:
-
+**Uso**:
 ```bash
-# Aumentar para 3 learners
-kubectl scale deployment learner2 -n paxos --replicas=2
+./run.sh
 ```
 
-### 9.2. Ajustar Configurações
+### 4. paxos-client.sh
 
-Para modificar configurações, edite o ConfigMap:
+**Propósito**: Cliente interativo para o sistema Paxos.
 
+**Funcionalidades**:
+- Menu interativo completo
+- Operações de leitura e escrita
+- Verificação de status
+- Envio direto para Proposers
+
+**Uso**:
 ```bash
-kubectl edit configmap paxos-config -n paxos
+./paxos-client.sh
 ```
 
-### 9.3. Adicionar Monitoramento Avançado
+### 5. monitor.sh
 
-Você pode integrar ferramentas como Prometheus e Grafana:
+**Propósito**: Monitoramento em tempo real do sistema.
 
+**Funcionalidades**:
+- Visualização de logs de todos os componentes
+- Filtragem por tipo de nó
+- Atualização periódica
+- Integração com logs do Kubernetes
+
+**Uso**:
 ```bash
-# Habilitar o add-on Prometheus do Minikube
-minikube addons enable metrics-server
-minikube addons enable prometheus
+./monitor.sh [opções]
 ```
 
-## 10. Conclusão
+### 6. cleanup-paxos-k8s.sh
 
-Você agora tem um sistema Paxos completo executando no Kubernetes! Esta configuração demonstra:
+**Propósito**: Limpar recursos Kubernetes.
 
-1. A implementação do algoritmo de consenso Paxos
-2. A integração com o protocolo Gossip para descoberta de nós
-3. O uso de uma arquitetura orientada a objetos para modularização
-4. A implantação em uma plataforma de orquestração de contêineres moderna
+**Funcionalidades**:
+- Remove todos os recursos na ordem correta
+- Opção para parar ou excluir o cluster Minikube
+- Limpeza completa do ambiente
 
-Esta combinação oferece um sistema distribuído resiliente, escalável e de fácil manutenção.
+**Uso**:
+```bash
+./cleanup-paxos-k8s.sh
+```
+
+## Exemplos de Uso
+
+### Exemplo 1: Inicialização Completa do Sistema
+
+```bash
+# 1. Preparar o ambiente (uma única vez)
+./setup-kubernetes-wsl.sh
+
+# Reiniciar WSL
+# No PowerShell: wsl --shutdown
+# Reabrir terminal WSL
+
+# 2. Iniciar o cluster Minikube
+minikube start --driver=docker
+
+# 3. Implantar o sistema
+./deploy-paxos-k8s.sh
+
+# 4. Inicializar a rede Paxos
+./run.sh
+```
+
+### Exemplo 2: Envio e Leitura de Valores
+
+```bash
+# 1. Abrir o cliente interativo
+./paxos-client.sh
+
+# 2. No menu, selecionar opção 2 (Enviar valor)
+# 3. Digitar um valor, por exemplo: "teste123"
+# 4. No menu, selecionar opção 3 (Ler valores)
+# 5. Verificar se o valor enviado aparece na lista
+```
+
+### Exemplo 3: Monitoramento Durante Operações
+
+```bash
+# Em um terminal, iniciar o monitor
+./monitor.sh
+
+# Em outro terminal, usar o cliente para enviar valores
+./paxos-client.sh
+
+# Observar no monitor como a proposta passa pelos Proposers,
+# é aceita pelos Acceptors e finalmente aprendida pelos Learners
+```
+
+### Exemplo 4: Testando Tolerância a Falhas
+
+```bash
+# 1. Iniciar o monitor
+./monitor.sh
+
+# 2. Em outro terminal, excluir um acceptor
+kubectl scale deployment acceptor1 -n paxos --replicas=0
+
+# 3. Usar o cliente para enviar um novo valor
+./paxos-client.sh
+# Selecionar opção 2 (Enviar valor)
+# Digitar um valor
+
+# 4. Observar no monitor como o sistema ainda alcança consenso
+# mesmo com um acceptor faltando
+
+# 5. Restaurar o acceptor
+kubectl scale deployment acceptor1 -n paxos --replicas=1
+```
+
+## Solução de Problemas
+
+### Problema: Pods não iniciam ou ficam em estado pendente
+
+**Sintomas**: Após executar `./deploy-paxos-k8s.sh`, alguns pods não atingem o estado "Running".
+
+**Soluções**:
+1. Verificar eventos do Kubernetes:
+   ```bash
+   kubectl get events -n paxos
+   ```
+2. Verificar detalhes do pod:
+   ```bash
+   kubectl describe pod <nome-do-pod> -n paxos
+   ```
+3. Verificar logs do pod:
+   ```bash
+   kubectl logs <nome-do-pod> -n paxos
+   ```
+4. Verificar recursos disponíveis no Minikube:
+   ```bash
+   minikube ssh -- free -h
+   minikube ssh -- df -h
+   ```
+
+### Problema: Cliente não consegue se conectar aos serviços
+
+**Sintomas**: O script `./paxos-client.sh` mostra erros de conexão.
+
+**Soluções**:
+1. Verificar se os pods estão em execução:
+   ```bash
+   kubectl get pods -n paxos
+   ```
+2. Verificar detalhes dos serviços:
+   ```bash
+   kubectl get services -n paxos
+   ```
+3. Verificar encaminhamento de portas do Minikube:
+   ```bash
+   minikube service list -n paxos
+   ```
+4. Reiniciar o script `run.sh` para verificar o estado do sistema
+
+### Problema: Não há líder eleito
+
+**Sintomas**: O monitor mostra "Sistema sem líder eleito" ou propostas não são aceitas.
+
+**Soluções**:
+1. Verificar logs dos proposers:
+   ```bash
+   kubectl logs -l app=proposer1 -n paxos
+   ```
+2. Reiniciar o processo de eleição:
+   ```bash
+   ./run.sh
+   ```
+3. Verificar se há pelo menos um quórum de acceptors disponível (pelo menos 2 de 3):
+   ```bash
+   kubectl get pods -n paxos -l role=acceptor
+   ```
+
+### Problema: Erros ao executar scripts
+
+**Sintomas**: Scripts mostram erros de permissão ou "command not found".
+
+**Soluções**:
+1. Verificar permissões de execução:
+   ```bash
+   chmod +x *.sh
+   ```
+2. Verificar se o script está usando a codificação correta:
+   ```bash
+   dos2unix *.sh  # Se instalado
+   ```
+3. Verificar o shebang do script:
+   ```bash
+   head -n 1 *.sh  # Deve mostrar #!/bin/bash
+   ```
+
+## Entendendo o Algoritmo Paxos
+
+### Visão Geral do Paxos
+
+O Paxos é um algoritmo de consenso distribuído projetado para alcançar acordo em um valor proposto entre um conjunto de processos, mesmo na presença de falhas. O algoritmo opera em duas fases principais:
+
+### Fase 1: Prepare/Promise
+
+1. Um proposer escolhe um número de proposta `n` e envia uma mensagem `prepare(n)` para um quórum de acceptors.
+2. Quando um acceptor recebe `prepare(n)`:
+   - Se `n` for maior que qualquer prepare anterior, ele promete não aceitar propostas menores que `n` e responde com um `promise(n)`.
+   - O promise inclui o valor de qualquer proposta que o acceptor já tenha aceitado.
+3. O proposer coleta promessas de um quórum de acceptors.
+
+### Fase 2: Accept/Accepted
+
+1. Se o proposer recebe promise de um quórum de acceptors, ele envia `accept(n, v)` onde:
+   - `n` é o número da proposta
+   - `v` é o valor a ser proposto (ou o valor de maior número já aceitado entre as respostas)
+2. Quando um acceptor recebe `accept(n, v)`:
+   - Se ele não prometeu para um número maior que `n`, ele aceita a proposta e notifica os learners
+3. Os learners detectam quando um quórum de acceptors aceitou um valor
+
+### Multi-Paxos e Eleição de Líder
+
+Nossa implementação usa uma variação do Paxos chamada Multi-Paxos com eleição de líder:
+
+1. Na inicialização, os proposers competem pela liderança
+2. O primeiro proposer a obter um quórum de promessas se torna líder
+3. O líder pode propor valores diretamente (pulando a fase Prepare)
+4. Se o líder falhar, uma nova eleição ocorre automaticamente
+5. O protocolo Gossip propaga informações sobre o líder atual
+
+---
+
+Para mais informações sobre o algoritmo Paxos, consulte o paper original de Leslie Lamport, "Paxos Made Simple".
