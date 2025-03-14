@@ -85,7 +85,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: SEED_NODES
-          value: "1:proposer:proposer1:3001"
+          value: "1:proposer:proposer1.paxos.svc.cluster.local:3001"
         ports:
         - containerPort: 3002
           name: api
@@ -140,7 +140,7 @@ spec:
             fieldRef:
               fieldPath: metadata.name
         - name: SEED_NODES
-          value: "1:proposer:proposer1:3001,2:proposer:proposer2:3002"
+          value: "1:proposer:proposer1.paxos.svc.cluster.local:3001,2:proposer:proposer2.paxos.svc.cluster.local:3002"
         ports:
         - containerPort: 3003
           name: api

@@ -18,7 +18,7 @@ spec:
     port: 8000
     targetPort: monitor
     nodePort: 30801
-
+---
 # Exposição externa via NodePort para o Proposer1
 apiVersion: v1
 kind: Service
@@ -38,7 +38,7 @@ spec:
     port: 8000
     targetPort: monitor
     nodePort: 30811
-
+---
 # Exposição externa via NodePort para o Learner1
 apiVersion: v1
 kind: Service

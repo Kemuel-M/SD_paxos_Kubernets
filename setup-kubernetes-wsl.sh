@@ -26,6 +26,12 @@ fi
 
 echo -e "${GREEN}Sistema operacional: $NAME $VERSION_ID${NC}"
 
+# Remover repositório do Kubernetes problemático, se existir
+if [ -f /etc/apt/sources.list.d/kubernetes.list ]; then
+    echo -e "${YELLOW}Removendo repositório problemático do Kubernetes...${NC}"
+    sudo rm /etc/apt/sources.list.d/kubernetes.list
+fi
+
 # Atualizar pacotes
 echo -e "\n${YELLOW}Atualizando pacotes...${NC}"
 sudo apt-get update -qq || {

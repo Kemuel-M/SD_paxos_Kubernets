@@ -1,0 +1,42 @@
+Verificar os serviços criados
+kubectl get services -n paxos
+
+Obter as URLs manualmente
+Depois que os serviços estiverem criados, você pode obter as URLs com:
+minikube service client1-external --url -n paxos
+minikube service proposer1-external --url -n paxos
+
+Verificar a definição dos pods
+kubectl describe pod -n paxos -l app=proposer1
+
+Verificar os logs dos pods
+# Verificar logs do proposer1
+kubectl logs -n paxos -l app=proposer1
+# Verificar logs do acceptor1
+kubectl logs -n paxos -l app=acceptor1
+# Verificar logs do learner1
+kubectl logs -n paxos -l app=learner1
+
+# Execute estes comandos para reiniciar o CoreDNS e garantir que o DNS esteja funcionando
+kubectl rollout restart deployment -n kube-system coredns
+
+# Verifique o status do CoreDNS
+kubectl get pods -n kube-system -l k8s-app=kube-dns
+
+# Ative o addon DNS do Minikube, se necessário
+minikube addons enable dns
+
+# Verificar o status de cada deployment individualmente
+kubectl rollout status deployment/proposer1 -n paxos
+kubectl rollout status deployment/proposer2 -n paxos
+kubectl rollout status deployment/proposer3 -n paxos
+kubectl rollout status deployment/acceptor1 -n paxos
+kubectl rollout status deployment/acceptor2 -n paxos
+kubectl rollout status deployment/acceptor3 -n paxos
+kubectl rollout status deployment/learner1 -n paxos
+kubectl rollout status deployment/learner2 -n paxos
+kubectl rollout status deployment/client1 -n paxos
+kubectl rollout status deployment/client2 -n paxos
+
+verificar todos os pods para ver se estão prontos:
+kubectl get pods -n paxos
