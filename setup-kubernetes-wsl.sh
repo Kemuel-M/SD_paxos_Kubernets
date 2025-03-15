@@ -5,6 +5,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 RED='\033[0;31m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
 
 clear
@@ -12,6 +13,7 @@ echo -e "${BLUE}═════════════════════�
 echo -e "${BLUE}              PREPARAÇÃO DE AMBIENTE KUBERNETES NO WSL           ${NC}"
 echo -e "${BLUE}═════════════════════════════════════════════════════════════════${NC}"
 
+# Verificar sistema operacional
 echo -e "\n${YELLOW}Verificando sistema operacional...${NC}"
 if [ ! -f /etc/os-release ]; then
     echo -e "${RED}[ERRO] Arquivo /etc/os-release não encontrado. Este script é compatível apenas com WSL Ubuntu.${NC}"
@@ -32,18 +34,33 @@ if [ -f /etc/apt/sources.list.d/kubernetes.list ]; then
     sudo rm /etc/apt/sources.list.d/kubernetes.list
 fi
 
-# Atualizar pacotes
-echo -e "\n${YELLOW}Atualizando pacotes...${NC}"
-sudo apt-get update -qq || {
-    echo -e "${RED}[ERRO] Falha ao atualizar pacotes. Verifique sua conexão com a internet.${NC}"
-    exit 1
-}
+# Verificar se o script de dependências foi executado
+echo -e "\n${YELLOW}Verificando dependências essenciais...${NC}"
+if ! command -v curl &> /dev/null || ! command -v jq &> /dev/null; then
+    echo -e "${RED}[AVISO] Dependências essenciais não encontradas.${NC}"
+    echo -e "${YELLOW}Execute primeiro o script install-dependencies.sh:${NC}"
+    echo -e "${CYAN}./install-dependencies.sh${NC}"
+    
+    read -p "Deseja continuar mesmo assim? (s/n): " continue_anyway
+    if [[ ! "$continue_anyway" =~ [sS] ]]; then
+        echo -e "${YELLOW}Instalação abortada. Execute primeiro o script de dependências.${NC}"
+        exit 1
+    fi
+fi
 
-echo -e "\n${YELLOW}Instalando dependências essenciais...${NC}"
-sudo apt-get install -y apt-transport-https ca-certificates curl software-properties-common gnupg2 || {
-    echo -e "${RED}[ERRO] Falha ao instalar dependências.${NC}"
-    exit 1
-}
+# Verificar se WSL está na versão 2
+echo -e "\n${YELLOW}Verificando versão do WSL...${NC}"
+if [ -f /proc/version ]; then
+    if grep -q "microsoft" /proc/version && ! grep -q "WSL2" /proc/version; then
+        echo -e "${YELLOW}Você parece estar usando WSL1. Recomendamos o uso do WSL2 para melhor desempenho.${NC}"
+        echo -e "${YELLOW}Você pode converter para WSL2 usando o PowerShell do Windows:${NC}"
+        echo -e "${CYAN}wsl --set-version Ubuntu-20.04 2${NC}"
+    else
+        echo -e "${GREEN}WSL2 detectado.${NC}"
+    fi
+else
+    echo -e "${YELLOW}Não foi possível determinar a versão do WSL.${NC}"
+fi
 
 # Instalar Docker se não estiver instalado
 if ! command -v docker &> /dev/null; then
@@ -111,6 +128,28 @@ else
     echo -e "${GREEN}kubectl já está instalado: $(kubectl version --client --short 2>/dev/null || echo 'versão não disponível')${NC}"
 fi
 
+# Verificar se precisamos adicionar repositório do kubernetes
+if ! command -v kubeadm &> /dev/null; then
+    echo -e "\n${YELLOW}Instalando kubelet, kubeadm e kubectl do repositório oficial...${NC}"
+    
+    # Adicionar chave GPG do Kubernetes
+    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+    
+    # Adicionar repositório
+    echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    
+    # Atualizar e instalar
+    sudo apt-get update
+    sudo apt-get install -y kubelet kubeadm 
+    
+    # Fixar versão para evitar atualizações automáticas
+    sudo apt-mark hold kubelet kubeadm
+    
+    echo -e "${GREEN}Componentes do Kubernetes instalados com sucesso!${NC}"
+else
+    echo -e "${GREEN}Componentes do Kubernetes já estão instalados: $(kubeadm version -o short 2>/dev/null || echo 'versão não disponível')${NC}"
+fi
+
 # Instalar Minikube
 if ! command -v minikube &> /dev/null; then
     echo -e "\n${YELLOW}Instalando Minikube...${NC}"
@@ -125,22 +164,18 @@ else
     echo -e "${GREEN}Minikube já está instalado: $(minikube version --short 2>/dev/null || echo 'versão não disponível')${NC}"
 fi
 
-# Verificar e instalar socat (necessário para serviços NodePort no WSL)
-if ! command -v socat &> /dev/null; then
-    echo -e "\n${YELLOW}Instalando socat (necessário para encaminhamento de portas)...${NC}"
-    sudo apt-get install -y socat
-    echo -e "${GREEN}socat instalado com sucesso!${NC}"
+# Instalar Helm
+if ! command -v helm &> /dev/null; then
+    echo -e "\n${YELLOW}Instalando Helm...${NC}"
+    
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+    rm get_helm.sh
+    
+    echo -e "${GREEN}Helm instalado com sucesso!${NC}"
 else
-    echo -e "${GREEN}socat já está instalado.${NC}"
-fi
-
-# Instalar Python3 e pip (necessário para os scripts)
-if ! command -v python3 &> /dev/null; then
-    echo -e "\n${YELLOW}Instalando Python3 e pip...${NC}"
-    sudo apt-get install -y python3 python3-pip
-    echo -e "${GREEN}Python3 instalado com sucesso!${NC}"
-else
-    echo -e "${GREEN}Python3 já está instalado: $(python3 --version)${NC}"
+    echo -e "${GREEN}Helm já está instalado: $(helm version --short 2>/dev/null || echo 'versão não disponível')${NC}"
 fi
 
 # Testar Docker
@@ -150,6 +185,24 @@ if docker run --rm hello-world &>/dev/null; then
 else
     echo -e "${RED}[AVISO] Teste do Docker falhou. Verifique se o serviço está em execução.${NC}"
     echo -e "${YELLOW}Execute 'sudo service docker start' após reiniciar o WSL.${NC}"
+fi
+
+# Testar configuração do Minikube
+echo -e "\n${YELLOW}Verificando configuração do Minikube...${NC}"
+if minikube config view &>/dev/null; then
+    echo -e "${GREEN}Configuração do Minikube está correta.${NC}"
+else
+    echo -e "${YELLOW}Configurando Minikube para usar o driver Docker...${NC}"
+    minikube config set driver docker
+fi
+
+# Se o Minikube já está em execução, exibir seu status
+if minikube status &>/dev/null; then
+    echo -e "${GREEN}Minikube já está em execução:${NC}"
+    minikube status
+else
+    echo -e "${YELLOW}Minikube não está em execução. Você pode iniciá-lo com:${NC}"
+    echo -e "${CYAN}minikube start --driver=docker${NC}"
 fi
 
 echo -e "\n${BLUE}═════════════════════════════════════════════════════════════════${NC}"
@@ -169,8 +222,5 @@ echo -e "   ${CYAN}minikube status${NC}"
 echo -e ""
 echo -e "4. Implante o sistema Paxos:"
 echo -e "   ${CYAN}./deploy-paxos-k8s.sh${NC}"
-echo -e ""
-echo -e "5. Inicie o sistema Paxos:"
-echo -e "   ${CYAN}./run.sh${NC}"
 echo -e ""
 echo -e "${BLUE}═════════════════════════════════════════════════════════════════${NC}"

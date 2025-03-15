@@ -84,6 +84,7 @@ paxos-system/
 │   ├── 05-clients.yaml
 │   ├── 06-ingress.yaml
 │   └── 07-nodeport-services.yaml
+├── setup-dependencies.sh
 ├── setup-kubernetes-wsl.sh # Configuração do ambiente no WSL
 ├── deploy-paxos-k8s.sh     # Implantação do sistema no Kubernetes
 ├── run.sh                  # Inicialização da rede Paxos
