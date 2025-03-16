@@ -96,57 +96,54 @@ run_command "kubectl get pods -n $NAMESPACE"
 # Obter URLs dos serviços externos
 show_subsection_header "URLs DOS SERVIÇOS"
 
-echo -e "${YELLOW}Obtendo URLs dos serviços (isso pode levar alguns segundos)...${NC}"
+echo -e "${YELLOW}Obtendo URLs dos serviços via NodePort...${NC}"
 
-# Método alternativo para obter URLs usando NodePort
-get_service_url() {
+# Extrair informações diretamente sem usar o comando minikube service --url
+get_node_port_url() {
     local service=$1
-    local port_name=$2
-    
-    # Obter NodePort
-    local node_port=$(kubectl get service $service -n $NAMESPACE -o jsonpath="{.spec.ports[?(@.name==\"$port_name\")].nodePort}")
-    
-    if [ -z "$node_port" ]; then
-        echo "[Não disponível - NodePort não encontrado]"
-        return
-    fi
-    
-    # Obter IP do nó
-    local node_ip=$(minikube ip 2>/dev/null)
+    local timeout=5
+
+    # Usar timeout para evitar que o comando fique travado
+    local node_ip=$(timeout $timeout minikube ip 2>/dev/null || echo "")
     
     if [ -z "$node_ip" ]; then
-        echo "[Não disponível - IP do Minikube não encontrado]"
-        return
+        echo -e "${YELLOW}Não foi possível obter o IP do minikube, usando localhost...${NC}"
+        node_ip="localhost"
+    fi
+
+    # Obter as portas NodePort
+    local api_port=$(kubectl get service $service -n $NAMESPACE -o jsonpath="{.spec.ports[?(@.name=='api')].nodePort}")
+    local monitor_port=$(kubectl get service $service -n $NAMESPACE -o jsonpath="{.spec.ports[?(@.name=='monitor')].nodePort}")
+    
+    if [ -n "$api_port" ]; then
+        echo -e "API: ${CYAN}http://$node_ip:$api_port${NC}"
+    else
+        echo -e "API: ${RED}[Não disponível]${NC}"
     fi
     
-    echo "http://$node_ip:$node_port"
+    if [ -n "$monitor_port" ]; then
+        echo -e "Monitor: ${CYAN}http://$node_ip:$monitor_port${NC}"
+    else
+        echo -e "Monitor: ${RED}[Não disponível]${NC}"
+    fi
 }
 
-# Tentar o método convencional primeiro
-echo -e "${GRAY}Tentando método 1 (minikube service --url)...${NC}"
-client1_url=$(minikube service client1-external --url -n $NAMESPACE 2>/dev/null || echo "")
-proposer1_url=$(minikube service proposer1-external --url -n $NAMESPACE 2>/dev/null || echo "")
-learner1_url=$(minikube service learner1-external --url -n $NAMESPACE 2>/dev/null || echo "")
+# Mostrar URLs construídas para cada serviço externo
+echo -e "\n${YELLOW}Client1-external:${NC}"
+get_node_port_url "client1-external"
 
-# Se falhar, usar método alternativo
-if [ -z "$client1_url" ] || [ -z "$proposer1_url" ] || [ -z "$learner1_url" ]; then
-    echo -e "${YELLOW}Método 1 falhou, usando método alternativo...${NC}"
-    # Extrair primeira URL em caso de múltiplas
-    [ -z "$client1_url" ] && client1_url=$(get_service_url "client1-external" "api")
-    [ -z "$proposer1_url" ] && proposer1_url=$(get_service_url "proposer1-external" "api")
-    [ -z "$learner1_url" ] && learner1_url=$(get_service_url "learner1-external" "api")
-fi
+echo -e "\n${YELLOW}Proposer1-external:${NC}"
+get_node_port_url "proposer1-external"
 
-# Exibir resultados com verificação
-echo -e "Client1: ${CYAN}${client1_url:-[Não disponível]}${NC}"
-echo -e "Proposer1: ${CYAN}${proposer1_url:-[Não disponível]}${NC}"
-echo -e "Learner1: ${CYAN}${learner1_url:-[Não disponível]}${NC}"
+echo -e "\n${YELLOW}Learner1-external:${NC}"
+get_node_port_url "learner1-external"
 
-# Mostrar comando manual para acesso via minikube
-echo -e "\n${YELLOW}Para acessar os serviços diretamente, você pode usar:${NC}"
-echo -e "${GRAY}minikube service client1-external -n $NAMESPACE${NC}"
-echo -e "${GRAY}minikube service proposer1-external -n $NAMESPACE${NC}"
-echo -e "${GRAY}minikube service learner1-external -n $NAMESPACE${NC}"
+# Mostrar comando alternativo
+echo -e "\n${YELLOW}Para acessar os serviços diretamente via browser ou terminal:${NC}"
+echo -e "1. ${CYAN}Use as URLs acima${NC} com o IP/porta NodePort"
+echo -e "2. ${CYAN}OU abra um novo terminal e execute:${NC}"
+echo -e "   ${GRAY}minikube service client1-external -n $NAMESPACE --url${NC}"
+echo -e "   ${GRAY}minikube service proposer1-external -n $NAMESPACE --url${NC}"
 
 # 2. Verificação de definições e status dos deployments
 show_section_header "VERIFICAÇÃO DE DEPLOYMENTS"
