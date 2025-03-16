@@ -1,3 +1,5 @@
+estou usando  ambiente virtual Python
+
 
 proposer_node.py
 A verificação de líder acontece a cada 2 segundos, o que pode levar a muitas eleições simultâneas
@@ -31,22 +33,6 @@ atualizar o README.md com as atualizacoes feitas. para mostrar como usar cada co
 
 
 
-Resolving Your Paxos Leadership Deadlock
-how the leader election protocol works:
-The error "Not the leader" indicates that proposers are rejecting proposals because they're not considered the leader
-But since no leader exists, we're in a deadlock situation where:
-No node can propose because they're not the leader
-No node can become leader because they need to propose successfully first
-There's a fundamental paradox in your current implementation:
-A proposer can only propose values if it's the leader
-A proposer can only become the leader through a successful proposal
-No proposer can make a successful proposal without being the leader first
-This creates a catch-22 situation that the system can't resolve on its own.
-modifying your Paxos implementation to:
-Allow initial election without requiring current leadership
-Use a bootstrap mechanism to elect the first leader
-Include timeouts to detect failed leader elections
-Add automatic recovery when no leader exists
 
 e se fazer a comunicao deles todos via ssh?
 
@@ -55,6 +41,7 @@ e se fazer a comunicao deles todos via ssh?
 altere os arquivos necessarios para realizar o seguinte.
 quero que essas mundancas sejam permanentes, ou seja tem que ser
 nos arquivos do projeto.
+modifique permanentemente os arquivos fonte originais no diretório nodes/ 
 
 Etapas do Protocolo
 1. Bootstrap Inicial e Eleição Sem Liderança Prévia

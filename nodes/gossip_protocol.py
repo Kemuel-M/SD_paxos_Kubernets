@@ -169,15 +169,32 @@ class GossipProtocol:
                 target_url = f"http://{target['address']}:{target['port']}/gossip"
                 self.logger.debug(f"Enviando gossip para {target['role']} {target['id']} em {target_url}")
                 
-                response = requests.post(target_url, json=gossip_data, timeout=2.0)
+                # Implementar retry com backoff
+                max_retries = 2
+                base_timeout = 1.0
                 
-                if response.status_code == 200:
-                    result = response.json()
-                    self.logger.debug(f"Gossip enviado com sucesso para {target['id']}. Atualizações: {result.get('updates', 0)}")
-                else:
-                    self.logger.warning(f"Falha ao enviar gossip para {target['id']}: {response.text}")
+                for retry in range(max_retries):
+                    try:
+                        timeout = base_timeout * (1.5 ** retry)  # Backoff exponencial mais suave
+                        response = requests.post(target_url, json=gossip_data, timeout=timeout)
+                        
+                        if response.status_code == 200:
+                            result = response.json()
+                            self.logger.debug(f"Gossip enviado com sucesso para {target['id']}. Atualizações: {result.get('updates', 0)}")
+                            break  # Sucesso, saímos do loop
+                        else:
+                            self.logger.warning(f"Falha ao enviar gossip para {target['id']}: {response.text}")
+                    except Exception as e:
+                        # Última tentativa falhou
+                        if retry == max_retries - 1:
+                            self.logger.warning(f"Erro ao enviar gossip para {target['id']} após {max_retries} tentativas: {e}")
+                        
+                        # Esperar antes de tentar novamente
+                        if retry < max_retries - 1:
+                            jitter = random.uniform(0.1, 0.3)
+                            time.sleep(base_timeout * (1.5 ** retry) + jitter)
             except Exception as e:
-                self.logger.warning(f"Erro ao enviar gossip para {target['id']}: {e}")
+                self.logger.warning(f"Erro ao configurar gossip para {target['id']}: {e}")
     
     def _handle_gossip(self, data):
         """
@@ -243,10 +260,34 @@ class GossipProtocol:
                     self.known_nodes[node_id]['last_seen'] = max(self.known_nodes[node_id]['last_seen'], timestamp)
             
             # Atualizar informações de líder (se recebido)
-            if received_leader and (not self.leader_id or received_leader != self.leader_id):
-                old_leader = self.leader_id
-                self.leader_id = received_leader
-                self.logger.info(f"Líder atualizado: {old_leader} -> {received_leader}")
+            if received_leader is not None:
+                # Verificar se o líder recebido é diferente ou não temos líder
+                if not self.leader_id or received_leader != self.leader_id:
+                    old_leader = self.leader_id
+                    self.leader_id = received_leader
+                    
+                    # Se o líder mudou, registrar a mudança
+                    if old_leader != received_leader:
+                        self.logger.info(f"Líder atualizado: {old_leader} -> {received_leader}")
+                
+                # Verificar heartbeat do líder nas metadatas
+                leader_metadata = None
+                if str(received_leader) in received_nodes:
+                    leader_metadata = received_nodes[str(received_leader)].get('metadata', {})
+                
+                # Se recebemos metadados do líder com heartbeat atualizado, atualizar
+                if leader_metadata and 'last_heartbeat' in leader_metadata:
+                    received_heartbeat = leader_metadata['last_heartbeat']
+                    
+                    # Atualizar informações do líder em nossos nós conhecidos
+                    if str(received_leader) in self.known_nodes:
+                        current_leader_metadata = self.known_nodes[str(received_leader)].get('metadata', {})
+                        current_heartbeat = current_leader_metadata.get('last_heartbeat', 0)
+                        
+                        # Atualizar apenas se o heartbeat recebido for mais recente
+                        if received_heartbeat > current_heartbeat:
+                            self.known_nodes[str(received_leader)]['metadata'] = leader_metadata
+                            self.logger.debug(f"Heartbeat do líder atualizado: {current_heartbeat} -> {received_heartbeat}")
         
         return jsonify({
             "status": "ok",
@@ -306,11 +347,19 @@ class GossipProtocol:
             self.leader_id = leader_id
             
             # Atualizar metadados locais para refletir status de líder
-            if leader_id == self.node_id:
-                self.update_local_metadata({"is_leader": True})
+            is_local_node_leader = leader_id == self.node_id
+            
+            if is_local_node_leader:
+                self.update_local_metadata({
+                    "is_leader": True,
+                    "last_heartbeat": time.time()
+                })
                 self.logger.info(f"Este nó ({self.node_id}) agora é o líder")
             else:
-                self.update_local_metadata({"is_leader": False})
+                # Se anteriormente era líder e agora não é mais
+                if old_leader == self.node_id and leader_id != self.node_id:
+                    self.update_local_metadata({"is_leader": False})
+                
                 self.logger.info(f"Líder atualizado: {old_leader} -> {leader_id}")
     
     def get_leader(self):
