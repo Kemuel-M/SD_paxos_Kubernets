@@ -96,3 +96,37 @@ Allow initial election without requiring current leadership
 Use a bootstrap mechanism to elect the first leader
 Include timeouts to detect failed leader elections
 Add automatic recovery when no leader exists
+
+Possível Deadlock: Pode haver um deadlock no código onde o líder fica preso em um ciclo de processamento
+Sobrecarga de Mensagens Gossip: O líder está recebendo muitas mensagens Gossip simultâneas e não consegue processar outras requisições
+endpoints de saúde não estavam funcionando corretamente
+Usar os nomes de serviço DNS para os pods
+Adicionar temporizadores para evitar deadlocks
+
+Deve um script de teste para:
+proposer:
+   tentar fazer comunicao com ele e ver os logs dele.
+   testar uma requisicao do cliente para ele e ver como ele responde.
+   testar como o proposer se comporta quando nao ha lider.
+   testar para ver uma eleicao acontecendo entre 3 proposers.
+   testar comunicacao do proposer com accepter.
+   testar se o proposer lider sabe que ele é o lider e nao procurar por um lider.
+acceptor:
+   testar se o acceptor recebe mensagens de um proposer.
+   testar se o accepter consegue se comunicar com o learner.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

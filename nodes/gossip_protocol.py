@@ -39,9 +39,9 @@ class GossipProtocol:
         self.lock = threading.Lock()
         
         # Configurações do protocolo
-        self.gossip_interval = 2.0  # segundos
-        self.cleanup_interval = 10.0  # segundos
-        self.node_timeout = 15.0  # segundos
+        self.gossip_interval = 10.0  # segundos
+        self.cleanup_interval = 20.0  # segundos
+        self.node_timeout = 30.0  # segundos
         self.fanout = 3  # número de nós para enviar em cada rodada
         
         # Mecanismo anti-entropia baseado em versões

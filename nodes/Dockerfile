@@ -4,13 +4,14 @@ WORKDIR /app
 
 # Install curl and other utilities
 RUN apt-get update && \
-    apt-get install -y curl dnsutils iputils-ping && \
+    apt-get install -y curl dnsutils iputils-ping net-tools procps && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
+    # Adicione esta linha ao Dockerfile
 
 # Copy requirements.txt and install dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
 # Copy all Python files
 COPY *.py .
