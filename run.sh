@@ -117,9 +117,6 @@ for i in {1..2}; do
     printf "%-15s %-15b\n" "Client $i" "$status"
 done
 
-# Inicialização do sistema Paxos
-echo -e "\n${YELLOW}Iniciando sistema Paxos...${NC}"
-
 # Função para executar comando em um pod
 exec_in_pod() {
     local service=$1
@@ -139,36 +136,119 @@ exec_in_pod() {
     return $?
 }
 
-# Verificar se há um líder eleito e iniciar eleição se necessário
-echo -e "${YELLOW}Verificando eleição de líder...${NC}"
-LEADER_ID=$(exec_in_pod "proposer1" "paxos" "curl -s http://localhost:3001/view-logs | python3 -c \"import sys, json; print(json.load(sys.stdin).get('current_leader', 'None'))\"")
-
-if [ "$LEADER_ID" == "None" ] || [ -z "$LEADER_ID" ]; then
-    echo -e "${YELLOW}Nenhum líder eleito. Forçando eleição...${NC}"
+# Função para tentar múltiplas vezes iniciar eleição
+force_election_with_retry() {
+    max_attempts=5
+    attempt=1
+    success=false
     
-    # Iterar sobre todos os proposers e tentar forçar uma eleição
-    for i in {1..3}; do
-        echo -e "${YELLOW}Tentando iniciar eleição via Proposer $i...${NC}"
+    echo -e "${YELLOW}Tentando iniciar eleição de líder (até $max_attempts tentativas)...${NC}"
+    
+    while [ $attempt -le $max_attempts ] && [ "$success" = false ]; do
+        echo -e "${YELLOW}Tentativa $attempt/${max_attempts}...${NC}"
         
-        # Enviar uma solicitação direta para forçar eleição
-        exec_in_pod "proposer$i" "paxos" "curl -s -X POST http://localhost:300$i/propose -H 'Content-Type: application/json' -d '{\"value\":\"trigger_election\", \"client_id\":9}'" > /dev/null
+        # Tente através de proposer1
+        resp1=$(exec_in_pod "proposer1" "paxos" "curl -s -X POST http://localhost:3001/propose -H 'Content-Type: application/json' -d '{\"value\":\"force_election\", \"client_id\":9}'")
         
-        # Aguardar um pouco para a eleição ocorrer
+        # Espere um pouco
         sleep 5
         
-        # Verificar se a eleição ocorreu
-        LEADER_ID=$(exec_in_pod "proposer1" "paxos" "curl -s http://localhost:3001/view-logs | python3 -c \"import sys, json; print(json.load(sys.stdin).get('current_leader', 'None'))\"")
+        # Verificar se a eleição foi bem-sucedida
+        leader=$(exec_in_pod "proposer1" "paxos" "curl -s http://localhost:3001/view-logs | grep -o '\"current_leader\":[^,}]*' | cut -d':' -f2 | tr -d '\"' 2>/dev/null")
         
-        if [ "$LEADER_ID" != "None" ] && [ -n "$LEADER_ID" ]; then
-            echo -e "${GREEN}Líder eleito: Proposer $LEADER_ID${NC}"
+        if [ -n "$leader" ] && [ "$leader" != "null" ] && [ "$leader" != "None" ]; then
+            echo -e "${GREEN}Líder eleito: Proposer $leader${NC}"
+            success=true
             break
         fi
+        
+        # Se falhar com proposer1, tente proposer2
+        if [ $attempt -eq 2 ]; then
+            echo -e "${YELLOW}Tentando via proposer2...${NC}"
+            resp2=$(exec_in_pod "proposer2" "paxos" "curl -s -X POST http://localhost:3002/propose -H 'Content-Type: application/json' -d '{\"value\":\"force_election2\", \"client_id\":9}'")
+            sleep 5
+        fi
+        
+        # Se falhar com proposer2, tente proposer3
+        if [ $attempt -eq 3 ]; then
+            echo -e "${YELLOW}Tentando via proposer3...${NC}"
+            resp3=$(exec_in_pod "proposer3" "paxos" "curl -s -X POST http://localhost:3003/propose -H 'Content-Type: application/json' -d '{\"value\":\"force_election3\", \"client_id\":9}'")
+            sleep 5
+        fi
+        
+        # Se ainda falhar, tente com Python diretamente
+        if [ $attempt -eq 4 ]; then
+            echo -e "${YELLOW}Tentando eleição forçada via Python...${NC}"
+            python_script=$(cat <<EOF
+import json
+import time
+import requests
+import random
+
+def force_election():
+    print("Forçando eleição de líder via Python...")
+    proposers = [
+        ("localhost", 3001),
+        ("proposer1", 3001),
+        ("proposer2", 3002),
+        ("proposer3", 3003)
+    ]
+    
+    # Tentar cada proposer em ordem aleatória
+    random.shuffle(proposers)
+    
+    for proposer, port in proposers:
+        try:
+            print(f"Tentando via {proposer}:{port}...")
+            response = requests.post(
+                f"http://{proposer}:{port}/propose",
+                json={"value": f"force_election_python_{random.randint(1000,9999)}", "client_id": 9},
+                timeout=5
+            )
+            print(f"Resposta: {response.status_code}")
+            if response.status_code == 200:
+                print("Requisição aceita!")
+            time.sleep(3)
+            
+            # Verificar se há líder
+            status = requests.get(f"http://{proposer}:{port}/view-logs", timeout=2)
+            if status.status_code == 200:
+                leader = status.json().get('current_leader')
+                if leader:
+                    print(f"Líder eleito: {leader}")
+                    return True
+        except Exception as e:
+            print(f"Erro: {e}")
+    
+    return False
+
+force_election()
+EOF
+)
+            exec_in_pod "proposer1" "paxos" "python3 -c \"$python_script\""
+            sleep 5
+        fi
+        
+        attempt=$((attempt + 1))
+        sleep 2
     done
     
-    # Verificar novamente se há um líder
-    if [ "$LEADER_ID" == "None" ] || [ -z "$LEADER_ID" ]; then
-        echo -e "${RED}[AVISO] Não foi possível eleger um líder. O sistema pode não funcionar corretamente.${NC}"
+    if [ "$success" = false ]; then
+        echo -e "${RED}[AVISO] Não foi possível eleger um líder após $max_attempts tentativas.${NC}"
+        echo -e "${YELLOW}O sistema pode não funcionar corretamente até que um líder seja eleito.${NC}"
+        return 1
     fi
+    
+    return 0
+}
+
+# Verificar se há um líder eleito e iniciar eleição se necessário
+echo -e "\n${YELLOW}Verificando eleição de líder...${NC}"
+LEADER_ID=$(exec_in_pod "proposer1" "paxos" "curl -s http://localhost:3001/view-logs | python3 -c \"import sys, json; print(json.load(sys.stdin).get('current_leader', 'None'))\"")
+
+if [ "$LEADER_ID" == "None" ] || [ -z "$LEADER_ID" ] || [ "$LEADER_ID" == "null" ]; then
+    echo -e "${YELLOW}Nenhum líder eleito. Forçando eleição...${NC}"
+    force_election_with_retry
 else
     echo -e "${GREEN}Líder atual: Proposer $LEADER_ID${NC}"
 fi

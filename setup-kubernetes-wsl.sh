@@ -128,24 +128,28 @@ else
     echo -e "${GREEN}kubectl já está instalado: $(kubectl version --client --short 2>/dev/null || echo 'versão não disponível')${NC}"
 fi
 
-# Verificar se precisamos adicionar repositório do kubernetes
+# Criação do diretório keyrings se não existir
+sudo mkdir -p /etc/apt/keyrings
+
+# Instalar kubelet e kubeadm (opcional, não necessário para Minikube)
 if ! command -v kubeadm &> /dev/null; then
     echo -e "\n${YELLOW}Instalando kubelet, kubeadm e kubectl do repositório oficial...${NC}"
     
-    # Adicionar chave GPG do Kubernetes
-    curl -s https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo apt-key add -
+    # Adicionar chave GPG do Kubernetes (método moderno)
+    sudo curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | sudo gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
     
-    # Adicionar repositório
-    echo "deb https://apt.kubernetes.io/ kubernetes-xenial main" | sudo tee /etc/apt/sources.list.d/kubernetes.list
+    # Adicionar repositório (URL atualizada)
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" | sudo tee /etc/apt/sources.list.d/kubernetes.list
     
     # Atualizar e instalar
-    sudo apt-get update
-    sudo apt-get install -y kubelet kubeadm 
-    
-    # Fixar versão para evitar atualizações automáticas
-    sudo apt-mark hold kubelet kubeadm
-    
-    echo -e "${GREEN}Componentes do Kubernetes instalados com sucesso!${NC}"
+    if sudo apt-get update && sudo apt-get install -y kubelet kubeadm; then
+        # Fixar versão para evitar atualizações automáticas
+        sudo apt-mark hold kubelet kubeadm
+        echo -e "${GREEN}Componentes do Kubernetes instalados com sucesso!${NC}"
+    else
+        echo -e "${YELLOW}Nota: Kubelet e Kubeadm não foram instalados, mas isso não afetará o uso do Minikube.${NC}"
+        echo -e "${YELLOW}Minikube contém seu próprio ambiente Kubernetes e não requer esses componentes.${NC}"
+    fi
 else
     echo -e "${GREEN}Componentes do Kubernetes já estão instalados: $(kubeadm version -o short 2>/dev/null || echo 'versão não disponível')${NC}"
 fi
