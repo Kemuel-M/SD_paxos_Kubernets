@@ -39,7 +39,19 @@ class BaseNode:
         self.port = int(os.environ.get('PORT', self._get_default_port()))
         
         # Definir hostname (ou obter do ambiente)
-        self.hostname = os.environ.get('HOSTNAME', 'localhost')
+        raw_hostname = os.environ.get('HOSTNAME', 'localhost')
+        
+        # MODIFICAÇÃO: Converter o hostname do pod para o nome do serviço no Kubernetes
+        # No Kubernetes, os nomes de pods começam com o nome do serviço seguido por um hash
+        # Exemplo: "proposer1-d789dbb8b-8lj97" deve se tornar "proposer1"
+        if '-' in raw_hostname:
+            # Extrair apenas a parte do nome do serviço (antes do primeiro hífen)
+            service_name = raw_hostname.split('-')[0]
+            # Para uso dentro do cluster Kubernetes, use o formato DNS completo
+            self.hostname = f"{service_name}.{os.environ.get('NAMESPACE', 'paxos')}.svc.cluster.local"
+            self.logger.info(f"Usando nome de serviço Kubernetes: {self.hostname}")
+        else:
+            self.hostname = raw_hostname
         
         # Obter nós sementes (a partir de variáveis de ambiente)
         self.seed_nodes = self._get_seed_nodes()
@@ -97,10 +109,13 @@ class BaseNode:
         @self.app.route('/health', methods=['GET'])
         def health():
             """Verificar saúde do nó"""
+            # Adicionar logs para debug
+            self.logger.info(f"Health check solicitado para {self.node_role} {self.node_id}")
             return jsonify({
                 "status": "healthy",
                 "role": self.node_role,
-                "id": self.node_id
+                "id": self.node_id,
+                "timestamp": time.time()
             }), 200
         
         @self.app.route('/view-logs', methods=['GET'])

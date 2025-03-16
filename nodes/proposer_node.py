@@ -78,8 +78,11 @@ class Proposer(BaseNode):
     
     def _bootstrap_election(self):
         """Inicia o processo de bootstrap para eleição inicial de líder"""
+        # MODIFICAÇÃO: Aumentar o tempo de espera inicial para permitir descoberta de nós
         # Esperar para dar tempo aos outros nós de inicializar
-        time.sleep(self.initial_bootstrap_delay)
+        initial_delay = self.initial_bootstrap_delay * 3  # Aumentar em 3x
+        self.logger.info(f"Aguardando {initial_delay}s para bootstrap iniciar...")
+        time.sleep(initial_delay)
         
         self.logger.info("Iniciando processo de bootstrap para eleição inicial")
         
@@ -89,6 +92,12 @@ class Proposer(BaseNode):
             self.logger.info(f"Líder já existe durante bootstrap: {current_leader}")
             self.bootstrap_mode = False
             return
+        
+        # MODIFICAÇÃO: Log detalhado de nós conhecidos para debug
+        acceptors = self.gossip.get_nodes_by_role('acceptor')
+        self.logger.info(f"Acceptors conhecidos antes da eleição: {len(acceptors)}")
+        for aid, ainfo in acceptors.items():
+            self.logger.info(f"  Acceptor {aid}: {ainfo['address']}:{ainfo['port']}")
         
         # Pequeno atraso proporcional ao ID do nó para evitar sobreposição
         # Proposers com IDs mais baixos iniciam primeiro
@@ -119,6 +128,7 @@ class Proposer(BaseNode):
         self.bootstrap_attempts += 1
         if self.bootstrap_attempts >= self.max_bootstrap_attempts:
             self.bootstrap_mode = False
+
     
     def _handle_heartbeat(self, data):
         """

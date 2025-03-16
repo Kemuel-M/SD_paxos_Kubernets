@@ -29,6 +29,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: NAMESPACE
+          value: "paxos"
         - name: SEED_NODES
           value: "1:proposer:proposer1.paxos.svc.cluster.local:3001"
         ports:
@@ -84,6 +86,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: NAMESPACE
+          value: "paxos"
         - name: SEED_NODES
           value: "1:proposer:proposer1.paxos.svc.cluster.local:3001,4:acceptor:acceptor1.paxos.svc.cluster.local:4001"
         ports:
@@ -139,6 +143,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: metadata.name
+        - name: NAMESPACE
+          value: "paxos"
         - name: SEED_NODES
           value: "1:proposer:proposer1.paxos.svc.cluster.local:3001,4:acceptor:acceptor1.paxos.svc.cluster.local:4001,5:acceptor:acceptor2.paxos.svc.cluster.local:4002"
         ports:
